@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SkiaSharp;
@@ -48,6 +49,13 @@ namespace SkImageResizer
 
         public async Task ResizeImagesAsync(string sourcePath, string destPath, double scale)
         {
+            List<Task<AsyncData>> 前處理TaskList = new List<Task<AsyncData>>();
+            List<Task<AsyncData>> 中處理TaskList = new List<Task<AsyncData>>();
+            List<Task> 後處理TaskList = new List<Task>();
+
+            List<AsyncData> 前處理結果List = new List<AsyncData>();
+            List<AsyncData> 中處理結果List = new List<AsyncData>();
+
             if (!Directory.Exists(destPath))
             {
                 Directory.CreateDirectory(destPath);
@@ -56,26 +64,44 @@ namespace SkImageResizer
             await Task.Yield();
 
             var allFiles = FindImages(sourcePath);
+
             foreach (var filePath in allFiles)
             {
-                var bitmap = SKBitmap.Decode(filePath);
-                var imgPhoto = SKImage.FromBitmap(bitmap);
-                var imgName = Path.GetFileNameWithoutExtension(filePath);
+                前處理TaskList.Add(Task.Run(() =>
+                {
+                    AsyncData tmpAsyncData = new AsyncData();
+                    tmpAsyncData.Bitmap = SKBitmap.Decode(filePath);
+                    tmpAsyncData.ImgPhoto = SKImage.FromBitmap(tmpAsyncData.Bitmap);
+                    tmpAsyncData.ImgName = Path.GetFileNameWithoutExtension(filePath);
 
-                var sourceWidth = imgPhoto.Width;
-                var sourceHeight = imgPhoto.Height;
-
-                var destinationWidth = (int)(sourceWidth * scale);
-                var destinationHeight = (int)(sourceHeight * scale);
-
-                using var scaledBitmap = bitmap.Resize(
-                    new SKImageInfo(destinationWidth, destinationHeight),
-                    SKFilterQuality.High);
-                using var scaledImage = SKImage.FromBitmap(scaledBitmap);
-                using var data = scaledImage.Encode(SKEncodedImageFormat.Jpeg, 100);
-                using var s = File.OpenWrite(Path.Combine(destPath, imgName + ".jpg"));
-                data.SaveTo(s);
+                    return tmpAsyncData;
+                }));
             }
+
+            前處理結果List = (await Task.WhenAll(前處理TaskList)).ToList();
+
+            #region 效能 普遍在85.5下, 曾有一次提升至85.6%
+            foreach (var 前處理結果Data in 前處理結果List)
+            {
+                後處理TaskList.Add(Task.Run(() =>
+                {
+                    var sourceWidth = 前處理結果Data.ImgPhoto.Width;
+                    var sourceHeight = 前處理結果Data.ImgPhoto.Height;
+
+                    var destinationWidth = (int)(sourceWidth * scale);
+                    var destinationHeight = (int)(sourceHeight * scale);
+
+                    using var scaledBitmap = 前處理結果Data.Bitmap.Resize(
+                        new SKImageInfo(destinationWidth, destinationHeight),
+                        SKFilterQuality.High);
+                    using var scaledImage = SKImage.FromBitmap(scaledBitmap);
+                    using var data = scaledImage.Encode(SKEncodedImageFormat.Jpeg, 100);
+                    using var s = File.OpenWrite(Path.Combine(destPath, 前處理結果Data.ImgName + ".jpg"));
+                    data.SaveTo(s);
+                }));
+            }
+            await Task.WhenAll(後處理TaskList);
+            #endregion
         }
 
         /// <summary>
@@ -111,6 +137,29 @@ namespace SkImageResizer
             files.AddRange(Directory.GetFiles(srcPath, "*.jpg", SearchOption.AllDirectories));
             files.AddRange(Directory.GetFiles(srcPath, "*.jpeg", SearchOption.AllDirectories));
             return files;
+        }
+
+        private class AsyncData
+        {
+            /// <summary>
+            /// 存放 SkiaSharp Lib 的 Bitmap 型別的檔案
+            /// </summary>
+            public SKBitmap Bitmap { get; set; }
+
+            /// <summary>
+            /// 存放 SkiaSharp Lib 的圖像資料
+            /// </summary>
+            public SKImage ImgPhoto { get; set; }
+
+            /// <summary>
+            /// 圖檔名稱
+            /// </summary>
+            public string ImgName { get; set; }
+
+            /// <summary>
+            /// 存放 Data 的 Buffer
+            /// </summary>
+            public SKData Data { get; set; }
         }
     }
 }
