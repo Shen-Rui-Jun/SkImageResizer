@@ -81,10 +81,34 @@ namespace SkImageResizer
             前處理結果List = (await Task.WhenAll(前處理TaskList)).ToList();
 
             #region 效能 普遍在85.5下, 曾有一次提升至85.6%
+            //foreach (var 前處理結果Data in 前處理結果List)
+            //{
+            //    後處理TaskList.Add(Task.Run(() =>
+            //    {
+            //        var sourceWidth = 前處理結果Data.ImgPhoto.Width;
+            //        var sourceHeight = 前處理結果Data.ImgPhoto.Height;
+
+            //        var destinationWidth = (int)(sourceWidth * scale);
+            //        var destinationHeight = (int)(sourceHeight * scale);
+
+            //        using var scaledBitmap = 前處理結果Data.Bitmap.Resize(
+            //            new SKImageInfo(destinationWidth, destinationHeight),
+            //            SKFilterQuality.High);
+            //        using var scaledImage = SKImage.FromBitmap(scaledBitmap);
+            //        using var data = scaledImage.Encode(SKEncodedImageFormat.Jpeg, 100);
+            //        using var s = File.OpenWrite(Path.Combine(destPath, 前處理結果Data.ImgName + ".jpg"));
+            //        data.SaveTo(s);
+            //    }));
+            //}
+            //await Task.WhenAll(後處理TaskList);
+            #endregion
+
+            #region 效能 普遍在85.5%上, 曾有一次跌落至84%
             foreach (var 前處理結果Data in 前處理結果List)
             {
-                後處理TaskList.Add(Task.Run(() =>
+                中處理TaskList.Add(Task.Run(() =>
                 {
+                    AsyncData tmpAsyncData = new AsyncData();
                     var sourceWidth = 前處理結果Data.ImgPhoto.Width;
                     var sourceHeight = 前處理結果Data.ImgPhoto.Height;
 
@@ -95,11 +119,25 @@ namespace SkImageResizer
                         new SKImageInfo(destinationWidth, destinationHeight),
                         SKFilterQuality.High);
                     using var scaledImage = SKImage.FromBitmap(scaledBitmap);
-                    using var data = scaledImage.Encode(SKEncodedImageFormat.Jpeg, 100);
-                    using var s = File.OpenWrite(Path.Combine(destPath, 前處理結果Data.ImgName + ".jpg"));
-                    data.SaveTo(s);
+                    var data = scaledImage.Encode(SKEncodedImageFormat.Jpeg, 100);
+
+                    tmpAsyncData.Data = data;
+                    tmpAsyncData.ImgName = 前處理結果Data.ImgName;
+                    return tmpAsyncData;
                 }));
             }
+
+            中處理結果List = (await Task.WhenAll(中處理TaskList)).ToList();
+
+            foreach (var 中處理結果Data in 中處理結果List)
+            {
+                後處理TaskList.Add(Task.Run(() =>
+                {
+                    using var s = File.OpenWrite(Path.Combine(destPath, 中處理結果Data.ImgName + ".jpg"));
+                    中處理結果Data.Data.SaveTo(s);
+                }));
+            }
+
             await Task.WhenAll(後處理TaskList);
             #endregion
         }
